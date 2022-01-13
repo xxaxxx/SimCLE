@@ -47,7 +47,6 @@ class SimCLE(nn.Module):
         # nomalization
         key = key / key.norm(dim=-1, keepdim=True)
         query = query / query.norm(dim=-1, keepdim=True)
-        tmp=key[:query.shape[0]]
         key = torch.cat([key, queue.to(query.device)], dim=0)
         
         # caculate the similarity scores
@@ -56,11 +55,11 @@ class SimCLE(nn.Module):
         
         # get the loss of image-to-text and text-to-image
         loss = F.cross_entropy(scores, labels.to(scores.device))
-      #  loss += F.cross_entropy(scores.T, labels.to(scores.device))
+#         loss += F.cross_entropy(scores.T[:labels.shape[0]], labels.to(scores.device))
+#         loss/=2
         
         # update the queue
-        queue=torch.cat([tmp,queue],dim=0)
-        queue=queue[:queue_len]
+        queue = key[:key.shape[0] - max(key.shape[0] - queue_len, 0)]
        
         if steps % 10 == 0 and dist.get_rank()==0:
             pred = scores.argmax(dim=-1)
@@ -83,13 +82,6 @@ class SimCLE(nn.Module):
         tensor_list=torch.cat(tensor_list,dim=0)
         return tensor_list
 
-    def gather_neg(self,tensor):
-        tensor_list=[torch.zeros_like(tensor) for _ in range(dist.get_world_size())]
-        dist.all_gather(tensor_list=tensor_list, tensor=tensor.contiguous())
-        tensor_list.pop(dist.get_rank())
-        tensor_list=torch.cat(tensor_list,dim=0)
-        return tensor_list
-
     def forward_distillation(self, text, queue, steps, queue_len):
         zh_inputs,en_inputs,_,_=text
         
@@ -103,31 +95,6 @@ class SimCLE(nn.Module):
         
         loss = F.mse_loss(q_features, k_features)
         return loss, queue
-
-    def forward_plus(self,  text, queue, steps, queue_len):
-        zh_inputs,en_inputs,mlm_inputs,mlm_labels=text
-        
-        q_features = self.q_transformer(**en_inputs,output_hidden_states=True, return_dict=True).pooler_output
-        
-        if mlm_inputs is not None:
-            outputs = self.q_transformer(**mlm_inputs,output_hidden_states=True, return_dict=True).last_hidden_state
-            outputs = self.lm_head(outputs).view(-1,self.vocab_size)
-        
-        with torch.no_grad():
-            k_features = self.k_transformer(**zh_inputs, output_hidden_states=True, return_dict=True).pooler_output
-        
-        if q_features.shape[-1]!=k_features.shape[-1]:
-            q_features=self.q_transformer.proj(q_features)
-        neg=self.gather_neg(q_features)
-        k_features=torch.cat([k_features,neg],dim=0)
-        
-        temp = self.logit_scale.exp()
-        loss, img_queue = self.criterion(q_features, k_features, temp, queue, steps,queue_len=queue_len)
-        if mlm_inputs is not None:
-            loss_mlm = F.cross_entropy(outputs, mlm_labels.view(-1))
-            loss+=loss_mlm*0.1
-        
-        return loss, img_queue
     
     def forward_single(self,  text, queue, steps, queue_len):
         zh_inputs,en_inputs,mlm_inputs,mlm_labels=text
@@ -152,13 +119,13 @@ class SimCLE(nn.Module):
         
         return loss, img_queue
     
-    def forward_2(self,  text, queue, steps, queue_len):
+
+    def forward(self,  text, queue, steps, queue_len):
         if steps==1 and dist.get_rank()==0:
             print('ok')
         zh_inputs,en_inputs,_,_=text
         q_features = self.q_transformer(**en_inputs,output_hidden_states=True, return_dict=True).pooler_output
-        with torch.no_grad():
-            k_features = self.k_transformer(**zh_inputs,output_hidden_states=True, return_dict=True).pooler_output
+        k_features = self.k_transformer(**zh_inputs,output_hidden_states=True, return_dict=True).pooler_output
         if q_features.shape[-1]!=k_features.shape[-1]:
             q_features=self.q_transformer.proj(q_features)
         q_features=self.gather(q_features)
@@ -166,25 +133,6 @@ class SimCLE(nn.Module):
         
         temp = self.logit_scale.exp()
         loss, img_queue = self.criterion(q_features, k_features, temp, queue, steps,queue_len=0)
-        return loss, img_queue
-
-    def forward(self,  text, queue, steps, queue_len):
-        zh_inputs,en_inputs,mlm_inputs,mlm_labels=text
-        
-        q_features = self.q_transformer(**en_inputs,output_hidden_states=True, return_dict=True).pooler_output
-        k_features = self.k_transformer(**zh_inputs, output_hidden_states=True, return_dict=True).pooler_output
-        
-        if q_features.shape[-1]!=k_features.shape[-1]:
-            q_features=self.q_transformer.proj(q_features)
-        q_neg=self.gather_neg(q_features)
-        k_neg=self.gather_neg(k_features)
-        k_features=torch.cat([k_features,q_neg,k_neg],dim=0)
-        
-        temp = self.logit_scale.exp()
-        loss, img_queue = self.criterion(q_features, k_features, temp, queue, steps,queue_len=0)
-
-       # loss_2, img_queue = self.criterion(k_features, orch.cat([q_features,q_neg,k_neg],dim=0), temp, queue, steps,queue_len=0)
-       # loss=loss_1+loss_2
         return loss, img_queue
 
 
