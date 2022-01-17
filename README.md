@@ -21,6 +21,8 @@ Train the sentence representations with your own translation dataset:
                     
                     --lr learning rate 
                     
+                    --model_name The pre-training model name e.g. bert-base-uncased roberta-large
+                    
                     --epochs 
                     
                     --task The pre-trainging task (default "plus" is represent the task combining contrastive objective and self-contrasting) 
