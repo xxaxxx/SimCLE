@@ -9,10 +9,10 @@ Train the sentence representations with your own translation dataset:
   The trianing file: simcle_contrastive.py
   Setup instruction: ./main.sh
   
-  The hyperparameter in main.sh:
-                    --save_model_path The path you want to save your pre-trained model.
-                    --batch_size
-                    --eval_step You evaluate your model every steps in training.
+  The hyperparameter in main.sh: \n
+                    --save_model_path The path you want to save your pre-trained model. \n
+                    --batch_size \n
+                    --eval_step You evaluate your model every steps in training. \
                     --queue_len The size of queueu containing negative samples, which is used to expand the comparaing objectives in contrastive learning.
                     --lr learning rate
                     --epochs
